@@ -1,0 +1,54 @@
+{
+    "name": "project-gen",
+    "version": "1.0.0",
+    "description": "AI-powered CLI tool for generating production-ready projects",
+    "main": "dist/index.js",
+    "bin": {
+        "project-gen": "dist/index.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "dev": "ts-node src/index.ts",
+        "lint": "eslint . --ext .ts",
+        "test": "jest"
+    },
+    "keywords": [
+        "cli",
+        "generator",
+        "ai",
+        "project",
+        "typescript"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "@google/genai": "^0.8.0",
+        "axios": "^1.6.2",
+        "chalk": "^4.1.2",
+        "commander": "^11.1.0",
+        "dotenv": "^16.3.1",
+        "glob": "^10.3.3",
+        "inquirer": "^8.2.6",
+        "listr2": "^6.6.1",
+        "node-fetch": "^3.3.2",
+        "openai": "^4.93.0",
+        "ora": "^5.4.1",
+        "simple-git": "^3.20.0",
+        "ts-node": "^10.9.1",
+        "typescript": "^5.2.2"
+    },
+    "devDependencies": {
+        "@types/inquirer": "^8.2.6",
+        "@types/jest": "^29.5.5",
+        "@types/node": "^20.8.2",
+        "@typescript-eslint/eslint-plugin": "^6.7.4",
+        "@typescript-eslint/parser": "^6.7.4",
+        "eslint": "^8.50.0",
+        "jest": "^29.7.0",
+        "ts-jest": "^29.1.1"
+    },
+    "engines": {
+        "node": ">=14.0.0"
+    }
+}
