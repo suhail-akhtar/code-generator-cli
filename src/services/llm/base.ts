@@ -1,5 +1,5 @@
 import { ProjectStructure, ProjectFile, ProjectPlan, Documentation } from '../../types';
-import { logger } from '../../utils/logger'; // Ensure logger is correctly imported
+import { logger } from '../../utils/logger';
 
 export abstract class BaseLLMService {
   constructor(protected apiKey: string) {
@@ -26,24 +26,6 @@ export abstract class BaseLLMService {
     suggestions: string[];
   }>;
   
-  // protected parseJsonFromText(text: string): any {
-  //   // Extract JSON from the response
-  //   const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/) || 
-  //                     text.match(/```\n([\s\S]*?)\n```/) || 
-  //                     text.match(/{[\s\S]*?}/);
-                      
-  //   if (jsonMatch) {
-  //     const jsonStr = jsonMatch[0].replace(/```json\n|```\n|```/g, '');
-  //     return JSON.parse(jsonStr);
-  //   } else {
-  //     try {
-  //       return JSON.parse(text);
-  //     } catch (e) {
-  //       throw new Error(`Failed to parse JSON from LLM response: ${text.substring(0, 100)}...`);
-  //     }
-  //   }
-  // }
-
   protected parseJsonFromText(text: string): any {
     try {
       // First try to parse directly if it's already valid JSON
@@ -122,5 +104,22 @@ export abstract class BaseLLMService {
     fixed = fixed.replace(/(\{|\,)\s*([a-zA-Z0-9_]+)\s*\:/g, '$1"$2":');
     
     return fixed;
+  }
+  
+  /**
+   * Enhances LLM prompts based on the operation type
+   * @param prompt Original prompt
+   * @param operationType Type of operation (add, update, fix, etc.)
+   * @returns Enhanced prompt
+   */
+  protected enhancePrompt(prompt: string, operationType: string): string {
+    const promptPrefix = {
+      add: "Add new functionality while preserving existing code:",
+      update: "Update the following components while preserving the rest:",
+      fix: "Fix issues in the following components:",
+      enhance: "Enhance the following components:"
+    }[operationType] || "Modify the following:";
+    
+    return `${promptPrefix}\n\n${prompt}\n\nIMPORTANT: Focus only on the required changes. Maintain compatibility with existing code.`;
   }
 }

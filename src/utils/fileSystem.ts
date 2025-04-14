@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { glob } from 'glob';
 import { logger } from './logger';
+import { FileChange } from '../types';
 
 /**
  * Create a directory if it doesn't exist
@@ -102,5 +103,64 @@ export async function deletePath(path: string, recursive: boolean = false): Prom
   } catch (error) {
     logger.error(`Error deleting ${path}:`, error);
     throw error;
+  }
+}
+
+/**
+ * Apply a set of file changes to a project
+ * @param projectDir Project directory
+ * @param changes Array of file changes
+ * @returns Promise that resolves when all changes are applied
+ */
+export async function applyFileChanges(projectDir: string, changes: FileChange[]): Promise<void> {
+  for (const change of changes) {
+    const filePath = path.join(projectDir, change.path);
+    
+    try {
+      switch (change.type) {
+        case 'add':
+        case 'modify':
+          if (!change.content) {
+            logger.warn(`No content provided for ${change.type} operation on ${change.path}`);
+            continue;
+          }
+          await writeFileWithContent(filePath, change.content);
+          logger.debug(`${change.type === 'add' ? 'Added' : 'Modified'} file: ${change.path}`);
+          break;
+          
+        case 'delete':
+          if (await fileExists(filePath)) {
+            await deletePath(filePath);
+            logger.debug(`Deleted file: ${change.path}`);
+          }
+          break;
+          
+        default:
+          logger.warn(`Unknown file change type: ${(change as any).type}`);
+      }
+    } catch (error) {
+      logger.error(`Error applying change to ${change.path}:`, error);
+      throw error;
+    }
+  }
+}
+
+/**
+ * Compare file content to check if it has changed
+ * @param filePath Path to the file
+ * @param newContent New content to compare
+ * @returns True if content differs or file doesn't exist, false if identical
+ */
+export async function hasContentChanged(filePath: string, newContent: string): Promise<boolean> {
+  try {
+    if (!(await fileExists(filePath))) {
+      return true; // New file
+    }
+    
+    const existingContent = await readFile(filePath);
+    return existingContent !== newContent;
+  } catch (error) {
+    logger.warn(`Error comparing file ${filePath}:`, error);
+    return true; // Assume changed if there's an error
   }
 }
