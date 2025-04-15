@@ -71,51 +71,94 @@ export async function generateProject(options: GenerateProjectOptions): Promise<
         
         let projectStructure: ProjectStructure;
         
-        if (isUpdate && existingStructure) {
-          // For updates, we'll use a modified approach that reuses the existing structure
-          const updatePrompt = `Update the existing project structure based on the new requirements. Only add or modify files that need to change.`;
-          projectStructure = await llmService.generateProjectStructure({ 
-            ...ctx.projectPlan,
-            updatePrompt 
-          });
+        try {
+          if (isUpdate && existingStructure) {
+            // For updates, we'll use a modified approach that reuses the existing structure
+            const updatePrompt = `Update the existing project structure based on the new requirements. Only add or modify files that need to change.`;
+            projectStructure = await llmService.generateProjectStructure({ 
+              ...ctx.projectPlan,
+              updatePrompt 
+            });
+            
+            // Merge with existing structure
+            projectStructure = await mergeProjectStructures(existingStructure, projectStructure);
+          } else {
+            projectStructure = await llmService.generateProjectStructure(ctx.projectPlan);
+          }
           
-          // Merge with existing structure
-          projectStructure = await mergeProjectStructures(existingStructure, projectStructure);
-        } else {
-          projectStructure = await llmService.generateProjectStructure(ctx.projectPlan);
+          // Ensure the structure has the required properties
+          if (!projectStructure.directories || !Array.isArray(projectStructure.directories)) {
+            logger.warn('Missing or invalid directories array, using defaults');
+            projectStructure.directories = ['src', 'public'];
+          }
+          
+          if (!projectStructure.files || !Array.isArray(projectStructure.files)) {
+            logger.warn('Missing or invalid files array, using defaults');
+            projectStructure.files = [];
+          }
+          
+          if (!projectStructure.dependencies) {
+            logger.warn('Missing dependencies object, using defaults');
+            projectStructure.dependencies = {
+              dependencies: {},
+              devDependencies: {}
+            };
+          }
+          
+          ctx.projectStructure = projectStructure;
+        } catch (error) {
+          logger.error('Error generating project structure:', error);
+          
+          // Provide a fallback structure
+          ctx.projectStructure = {
+            directories: ['src', 'public'],
+            files: [
+              {
+                path: 'README.md',
+                content: `# ${ctx.projectPlan.projectName || 'Generated Project'}\n\n${ctx.projectPlan.description || 'A project generated with AI assistance.'}`
+              }
+            ],
+            dependencies: {
+              dependencies: {},
+              devDependencies: {}
+            }
+          };
         }
         
-        ctx.projectStructure = projectStructure;
-        
         // Create subdirectories
-        for (const dir of projectStructure.directories) {
+        for (const dir of ctx.projectStructure.directories) {
           const dirPath = path.join(outputDir, dir);
           await createDirectoryIfNotExists(dirPath);
           task.output = `Created directory: ${dir}`;
         }
         
         // Create or update files
-        const fileCreationTasks = projectStructure.files.map(file => ({
-          title: `${isUpdate ? 'Updating' : 'Creating'} file: ${file.path}`,
-          task: async () => {
-            const filePath = path.join(outputDir, file.path);
-            
-            // For updates, check if the file exists and has changed
-            if (isUpdate) {
-              try {
-                const existingContent = await readFile(filePath);
-                if (existingContent === file.content) {
-                  return `File unchanged: ${file.path}`;
-                }
-              } catch (error) {
-                // File doesn't exist, will be created
-              }
-            }
-            
-            await writeFileWithContent(filePath, file.content);
-            return `${isUpdate ? 'Updated' : 'Created'} file: ${file.path}`;
-          }
-        }));
+        interface FileCreationTask {
+          title: string;
+          task: () => Promise<string>;
+        }
+
+                const fileCreationTasks: FileCreationTask[] = ctx.projectStructure.files.map((file: ProjectFile) => ({
+                  title: `${isUpdate ? 'Updating' : 'Creating'} file: ${file.path}`,
+                  task: async (): Promise<string> => {
+                    const filePath: string = path.join(outputDir, file.path);
+                    
+                    // For updates, check if the file exists and has changed
+                    if (isUpdate) {
+                      try {
+                        const existingContent: string = await readFile(filePath);
+                        if (existingContent === file.content) {
+                          return `File unchanged: ${file.path}`;
+                        }
+                      } catch (error) {
+                        // File doesn't exist, will be created
+                      }
+                    }
+                    
+                    await writeFileWithContent(filePath, file.content);
+                    return `${isUpdate ? 'Updated' : 'Created'} file: ${file.path}`;
+                  }
+                }));
         
         return task.newListr(fileCreationTasks, { 
           concurrent: false,
@@ -127,8 +170,13 @@ export async function generateProject(options: GenerateProjectOptions): Promise<
       title: 'Installing dependencies',
       task: async (ctx, task) => {
         logger.info('Installing packages...');
-        await installPackages(outputDir, ctx.projectStructure.dependencies);
-        return 'Dependencies installed successfully';
+        try {
+          await installPackages(outputDir, ctx.projectStructure.dependencies);
+          return 'Dependencies installed successfully';
+        } catch (error) {
+          logger.warn('Error installing packages:', error);
+          return 'Skipped some dependencies due to errors';
+        }
       }
     },
     {
@@ -189,19 +237,49 @@ export async function generateProject(options: GenerateProjectOptions): Promise<
       title: 'Updating documentation',
       task: async (ctx) => {
         logger.info('Generating documentation...');
-        const docs = await llmService.generateDocumentation(ctx.projectStructure);
-        
-        // Create README.md
-        const readmePath = path.join(outputDir, 'README.md');
-        await writeFileWithContent(readmePath, docs.readme);
-        
-        // Create additional documentation files
-        for (const doc of docs.additional) {
-          const docPath = path.join(outputDir, doc.path);
-          await writeFileWithContent(docPath, doc.content);
+        try {
+          const docs = await llmService.generateDocumentation(ctx.projectStructure);
+          
+          // Create README.md
+          if (docs.readme) {
+            const readmePath = path.join(outputDir, 'README.md');
+            await writeFileWithContent(readmePath, docs.readme);
+          }
+          
+          // Create additional documentation files
+          if (docs.additional && Array.isArray(docs.additional)) {
+            for (const doc of docs.additional) {
+              if (doc.path && doc.content) {
+                const docPath = path.join(outputDir, doc.path);
+                await writeFileWithContent(docPath, doc.content);
+              }
+            }
+          }
+          
+          return 'Documentation generated successfully';
+        } catch (error) {
+          logger.error('Error generating documentation:', error);
+          
+          // Create a basic README as fallback
+          const fallbackReadmePath = path.join(outputDir, 'README.md');
+          const fallbackReadme = `# ${ctx.projectPlan.projectName || 'Generated Project'}
+
+## Overview
+${ctx.projectPlan.description || 'A project generated with AI assistance.'}
+
+## Installation
+\`\`\`
+npm install
+\`\`\`
+
+## Usage
+\`\`\`
+npm start
+\`\`\``;
+          
+          await writeFileWithContent(fallbackReadmePath, fallbackReadme);
+          return 'Basic documentation created';
         }
-        
-        return 'Documentation generated successfully';
       }
     },
     {
@@ -209,13 +287,18 @@ export async function generateProject(options: GenerateProjectOptions): Promise<
       enabled: () => !isUpdate, // Skip for updates
       task: async (ctx) => {
         logger.info('Generating enhancement suggestions...');
-        const suggestions = await llmService.generateEnhancementSuggestions(ctx.projectStructure);
-        
-        // Save suggestions to a file
-        const suggestionsPath = path.join(outputDir, 'ENHANCEMENTS.md');
-        await writeFileWithContent(suggestionsPath, suggestions);
-        
-        return 'Enhancement suggestions generated successfully';
+        try {
+          const suggestions = await llmService.generateEnhancementSuggestions(ctx.projectStructure);
+          
+          // Save suggestions to a file
+          const suggestionsPath = path.join(outputDir, 'ENHANCEMENTS.md');
+          await writeFileWithContent(suggestionsPath, suggestions);
+          
+          return 'Enhancement suggestions generated successfully';
+        } catch (error) {
+          logger.error('Error generating enhancements:', error);
+          return 'Skipped enhancement suggestions due to an error';
+        }
       }
     }
   ], { concurrent: false, rendererOptions: { collapseErrors: false } });
@@ -329,6 +412,15 @@ async function extractExistingProjectStructure(projectDir: string): Promise<Proj
  * @returns Merged project structure
  */
 async function mergeProjectStructures(existing: ProjectStructure, newStructure: ProjectStructure): Promise<ProjectStructure> {
+  // Ensure properties exist
+  if (!existing.directories) existing.directories = [];
+  if (!existing.files) existing.files = [];
+  if (!existing.dependencies) existing.dependencies = { dependencies: {}, devDependencies: {} };
+  
+  if (!newStructure.directories) newStructure.directories = [];
+  if (!newStructure.files) newStructure.files = [];
+  if (!newStructure.dependencies) newStructure.dependencies = { dependencies: {}, devDependencies: {} };
+  
   // Combine directories without duplicates
   const directories = Array.from(new Set([...existing.directories, ...newStructure.directories]));
   

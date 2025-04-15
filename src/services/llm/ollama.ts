@@ -32,7 +32,7 @@ export class OllamaService extends BaseLLMService {
           prompt,
           stream: false,
           options: {
-            temperature: 0.7,
+            temperature: 0.2, // Lower temperature for more predictable JSON
             num_predict: 4096
           }
         },
@@ -58,43 +58,39 @@ export class OllamaService extends BaseLLMService {
     logger.info('Generating project plan with Ollama...');
     
     const prompt = `
-    <system>
-    You are an expert software architect tasked with creating a production-ready project plan.
-    Provide your response in JSON format.
-    </system>
-    
-    <user>
-    Based on the following requirements, create a detailed project plan:
-    
-    ${requirements}
-    
-    Provide your response in JSON format with the following structure:
+You are an expert software architect. Generate a project plan based on these requirements:
+
+${requirements}
+
+The output MUST be valid JSON with this exact structure (no explanation, just JSON):
+
+{
+  "projectName": "string",
+  "description": "string",
+  "technologies": ["string"],
+  "architecture": "string",
+  "components": [
     {
-      "projectName": "string",
+      "name": "string",
       "description": "string",
-      "technologies": ["string"],
-      "architecture": "string",
-      "components": [
+      "responsibilities": ["string"]
+    }
+  ],
+  "dataModels": [
+    {
+      "name": "string",
+      "fields": [
         {
           "name": "string",
-          "description": "string",
-          "responsibilities": ["string"]
-        }
-      ],
-      "dataModels": [
-        {
-          "name": "string",
-          "fields": [
-            {
-              "name": "string",
-              "type": "string",
-              "description": "string"
-            }
-          ]
+          "type": "string",
+          "description": "string"
         }
       ]
     }
-    </user>
+  ]
+}
+
+Remember: only respond with the JSON structure, no introduction, explanation or markdown code blocks.
     `;
     
     try {
@@ -110,43 +106,84 @@ export class OllamaService extends BaseLLMService {
     logger.info('Generating project structure with Ollama...');
     
     const prompt = `
-    <system>
-    You are an expert software developer tasked with creating a production-ready project structure.
-    Provide your response in JSON format.
-    </system>
-    
-    <user>
-    Based on the following project plan, create a detailed project structure with all necessary files and their content:
-    
-    ${JSON.stringify(plan, null, 2)}
-    
-    Provide your response in JSON format with the following structure:
+You are an expert software developer. Generate a project structure based on this plan:
+
+${JSON.stringify(plan, null, 2)}
+
+The output MUST be valid JSON with this exact structure (no explanation, just JSON):
+
+{
+  "directories": ["string"],
+  "files": [
     {
-      "directories": ["string"],
-      "files": [
-        {
-          "path": "string",
-          "content": "string"
-        }
-      ],
-      "dependencies": {
-        "dependencies": { "package-name": "version" },
-        "devDependencies": { "package-name": "version" }
-      }
+      "path": "string",
+      "content": "string"
     }
-    
-    Include all necessary files, such as package.json, tsconfig.json, README.md, etc.
-    For the content of each file, provide the complete code, not just placeholders.
-    Follow best practices for the chosen technologies.
-    Use latest stable versions of all dependencies.
-    Include proper type definitions for TypeScript.
-    Implement robust error handling.
-    </user>
+  ],
+  "dependencies": {
+    "dependencies": { "package-name": "version" },
+    "devDependencies": { "package-name": "version" }
+  }
+}
+
+Include all necessary files, such as package.json, tsconfig.json, README.md, etc.
+For the content of each file, provide the complete code, not just placeholders.
+Follow best practices for the chosen technologies.
+Use latest stable versions of all dependencies.
+
+Remember: only respond with the JSON structure, no introduction, explanation or markdown code blocks.
     `;
     
     try {
       const text = await this.callOllamaAPI(prompt);
-      return this.parseJsonFromText(text);
+      let result = this.parseJsonFromText(text);
+      
+      // Ensure critical properties exist to prevent "not iterable" errors
+      if (!result.directories) {
+        result.directories = ["src", "public"];
+      }
+      
+      if (!Array.isArray(result.directories)) {
+        result.directories = ["src", "public"];
+      }
+      
+      if (!result.files) {
+        result.files = [];
+      }
+      
+      if (!Array.isArray(result.files)) {
+        result.files = [];
+      }
+      
+      // Ensure dependencies is properly formatted
+      if (!result.dependencies) {
+        result.dependencies = {
+          dependencies: {},
+          devDependencies: {}
+        };
+      } else {
+        if (!result.dependencies.dependencies) {
+          result.dependencies.dependencies = {};
+        }
+        if (!result.dependencies.devDependencies) {
+          result.dependencies.devDependencies = {};
+        }
+      }
+      
+      // Common dependencies for React projects
+      if (plan.technologies.some(tech => 
+          tech.toLowerCase().includes('react') || 
+          tech.toLowerCase().includes('web'))) {
+        if (Object.keys(result.dependencies.dependencies).length === 0) {
+          result.dependencies.dependencies = {
+            "react": "^18.2.0",
+            "react-dom": "^18.2.0",
+            "react-scripts": "5.0.1"
+          };
+        }
+      }
+      
+      return result;
     } catch (error) {
       logger.error('Error generating project structure with Ollama:', error);
       throw error;
@@ -157,35 +194,39 @@ export class OllamaService extends BaseLLMService {
     logger.info('Fixing compilation errors with Ollama...');
     
     const prompt = `
-    <system>
-    You are an expert TypeScript developer tasked with fixing compilation errors.
-    Provide your response in JSON format.
-    </system>
-    
-    <user>
-    Here are the compilation errors:
-    ${errors.join('\n')}
-    
-    Here is the current project structure:
-    ${JSON.stringify(projectStructure, null, 2)}
-    
-    Analyze the errors and provide fixed versions of the files that need to be updated.
-    
-    Provide your response in JSON format with the following structure:
-    [
-      {
-        "path": "string",
-        "content": "string"
-      }
-    ]
-    
-    Include only the files that need to be updated with their full content.
-    </user>
+You are an expert TypeScript developer. Fix these compilation errors:
+
+Errors:
+${errors.join('\n')}
+
+Project Structure (abbreviated):
+${JSON.stringify(projectStructure.directories, null, 2)}
+${JSON.stringify(projectStructure.files.map(f => f.path), null, 2)}
+
+The output MUST be valid JSON with this exact structure (no explanation, just JSON):
+
+[
+  {
+    "path": "string",
+    "content": "string"
+  }
+]
+
+Only include files that need to be modified to fix the errors.
+
+Remember: only respond with the JSON structure, no introduction, explanation or markdown code blocks.
     `;
     
     try {
       const text = await this.callOllamaAPI(prompt);
-      return this.parseJsonFromText(text);
+      const result = this.parseJsonFromText(text);
+      
+      // Ensure we always return an array
+      if (!Array.isArray(result)) {
+        return [];
+      }
+      
+      return result;
     } catch (error) {
       logger.error('Error fixing compilation errors with Ollama:', error);
       throw error;
@@ -196,44 +237,53 @@ export class OllamaService extends BaseLLMService {
     logger.info('Generating documentation with Ollama...');
     
     const prompt = `
-    <system>
-    You are an expert technical writer tasked with creating documentation.
-    Provide your response in JSON format.
-    </system>
-    
-    <user>
-    Based on the following project structure, create comprehensive documentation:
-    
-    ${JSON.stringify(projectStructure, null, 2)}
-    
-    Provide your response in JSON format with the following structure:
+You are an expert technical writer. Generate documentation based on this project structure:
+
+Project Directories:
+${JSON.stringify(projectStructure.directories, null, 2)}
+
+Project Files:
+${JSON.stringify(projectStructure.files.map(f => f.path), null, 2)}
+
+The output MUST be valid JSON with this exact structure (no explanation, just JSON):
+
+{
+  "readme": "string",
+  "additional": [
     {
-      "readme": "string",
-      "additional": [
-        {
-          "path": "string",
-          "content": "string"
-        }
-      ]
+      "path": "string",
+      "content": "string"
     }
-    
-    The readme should include:
-    - Project overview
-    - Installation instructions
-    - Usage examples
-    - Configuration options
-    - Development setup
-    
-    Additional documentation should cover:
-    - API documentation
-    - Architecture overview
-    - Contributing guidelines
-    </user>
+  ]
+}
+
+The readme should include:
+- Project overview
+- Installation instructions
+- Usage examples
+- Configuration options
+
+Remember: only respond with the JSON structure, no introduction, explanation or markdown code blocks.
     `;
     
     try {
       const text = await this.callOllamaAPI(prompt);
-      return this.parseJsonFromText(text);
+      let result = this.parseJsonFromText(text);
+      
+      // Ensure critical properties exist
+      if (!result.readme) {
+        result.readme = `# Project Documentation\n\nThis is a generated project.`;
+      }
+      
+      if (!result.additional) {
+        result.additional = [];
+      }
+      
+      if (!Array.isArray(result.additional)) {
+        result.additional = [];
+      }
+      
+      return result;
     } catch (error) {
       logger.error('Error generating documentation with Ollama:', error);
       throw error;
@@ -244,48 +294,28 @@ export class OllamaService extends BaseLLMService {
     logger.info('Generating enhancement suggestions with Ollama...');
     
     const prompt = `
-    <system>
-    You are an expert software consultant tasked with suggesting enhancements for a project.
-    </system>
-    
-    <user>
-    Based on the following project structure, suggest enhancements and improvements:
-    
-    ${JSON.stringify(projectStructure, null, 2)}
-    
-    Provide a comprehensive Markdown document with the following sections:
-    
-    # Enhancement Suggestions
-    
-    ## Feature Enhancements
-    - [Suggestion 1]
-    - [Suggestion 2]
-    
-    ## Performance Improvements
-    - [Suggestion 1]
-    - [Suggestion 2]
-    
-    ## Security Enhancements
-    - [Suggestion 1]
-    - [Suggestion 2]
-    
-    ## UI/UX Improvements
-    - [Suggestion 1]
-    - [Suggestion 2]
-    
-    ## Advanced Features
-    - [Suggestion 1]
-    - [Suggestion 2]
-    
-    ## Next Steps
-    - [Step 1]
-    - [Step 2]
-    </user>
+You are an expert software consultant. Suggest enhancements for this project:
+
+Project Directories:
+${JSON.stringify(projectStructure.directories, null, 2)}
+
+Project Files:
+${JSON.stringify(projectStructure.files.map(f => f.path), null, 2)}
+
+Generate a Markdown document with the following sections:
+1. Feature Enhancements
+2. Performance Improvements
+3. Security Enhancements
+4. UI/UX Improvements
+5. Advanced Features
+6. Next Steps
+
+Note: This response does NOT need to be JSON. It should be Markdown formatted text.
     `;
     
     try {
       const text = await this.callOllamaAPI(prompt);
-      return text;
+      return text || `# Enhancement Suggestions\n\n## Feature Enhancements\n- Add more features\n\n## Next Steps\n- Implement the project`;
     } catch (error) {
       logger.error('Error generating enhancement suggestions with Ollama:', error);
       throw error;
@@ -319,46 +349,53 @@ export class OllamaService extends BaseLLMService {
     }
     
     const prompt = `
-    <system>
-    You are an expert code reviewer tasked with analyzing a project.
-    Provide your response in JSON format.
-    </system>
-    
-    <user>
-    Here is the structure of the project at ${projectPath}:
-    
-    ${Object.keys(fileContents).map(file => `- ${file}`).join('\n')}
-    
-    And here are the contents of the key files:
-    
-    ${Object.entries(fileContents).map(([file, content]) => `
-    === ${file} ===
-    ${content.substring(0, 500)}${content.length > 500 ? '... (truncated)' : ''}
-    `).join('\n')}
-    
-    Provide your analysis in JSON format with the following structure:
-    {
-      "issues": ["string"],
-      "suggestions": ["string"]
-    }
-    
-    Issues should include:
-    - Code quality issues
-    - Potential bugs
-    - Security vulnerabilities
-    - Performance issues
-    
-    Suggestions should include:
-    - Best practices
-    - Architectural improvements
-    - Code organization
-    - Testing strategies
-    </user>
+You are an expert code reviewer. Analyze this project:
+
+Files:
+${Object.keys(fileContents).join('\n')}
+
+The output MUST be valid JSON with this exact structure (no explanation, just JSON):
+
+{
+  "issues": ["string"],
+  "suggestions": ["string"]
+}
+
+Issues should include:
+- Code quality issues
+- Potential bugs
+- Security vulnerabilities
+
+Suggestions should include:
+- Best practices
+- Architectural improvements
+- Code organization
+
+Remember: only respond with the JSON structure, no introduction, explanation or markdown code blocks.
     `;
     
     try {
       const text = await this.callOllamaAPI(prompt);
-      return this.parseJsonFromText(text);
+      const result = this.parseJsonFromText(text);
+      
+      // Ensure critical properties exist
+      if (!result.issues) {
+        result.issues = [];
+      }
+      
+      if (!result.suggestions) {
+        result.suggestions = [];
+      }
+      
+      if (!Array.isArray(result.issues)) {
+        result.issues = [];
+      }
+      
+      if (!Array.isArray(result.suggestions)) {
+        result.suggestions = [];
+      }
+      
+      return result;
     } catch (error) {
       logger.error('Error scanning project with Ollama:', error);
       throw error;

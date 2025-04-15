@@ -22,13 +22,18 @@ export async function createDirectoryIfNotExists(dir: string): Promise<void> {
  * @param filePath Path to the file
  * @param content Content to write
  */
-export async function writeFileWithContent(filePath: string, content: string): Promise<void> {
+export async function writeFileWithContent(filePath: string, content: string | object): Promise<void> {
   try {
     // Create parent directory if it doesn't exist
     await createDirectoryIfNotExists(path.dirname(filePath));
     
+    // Convert object to string if necessary
+    const contentStr = typeof content === 'object' ? 
+      JSON.stringify(content, null, 2) : 
+      String(content);
+    
     // Write file
-    await fs.writeFile(filePath, content);
+    await fs.writeFile(filePath, contentStr);
     logger.debug(`File written: ${filePath}`);
   } catch (error) {
     logger.error(`Error writing file ${filePath}:`, error);

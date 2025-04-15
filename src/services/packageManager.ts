@@ -19,9 +19,27 @@ export interface Dependencies {
  */
 export async function installPackages(
   projectDir: string,
-  dependencies: Dependencies
+  dependencies: Dependencies | undefined
 ): Promise<void> {
   try {
+    // Handle case where dependencies is undefined
+    if (!dependencies) {
+      dependencies = {
+        dependencies: {},
+        devDependencies: {}
+      };
+      logger.warn('No dependencies specified, using empty dependency objects');
+    }
+    
+    // Ensure dependencies and devDependencies exist
+    if (!dependencies.dependencies) {
+      dependencies.dependencies = {};
+    }
+    
+    if (!dependencies.devDependencies) {
+      dependencies.devDependencies = {};
+    }
+    
     // Check if package.json exists
     const packageJsonPath = path.join(projectDir, 'package.json');
     let packageJson: any;
