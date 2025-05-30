@@ -9,7 +9,7 @@
     "scripts": {
         "build": "tsc",
         "start": "node dist/index.js",
-        "dev": "ts-node src/index.ts",
+        "dev": "ts-node src/index.ts generate -i",
         "lint": "eslint . --ext .ts",
         "test": "jest"
     },
